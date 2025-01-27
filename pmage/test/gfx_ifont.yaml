@@ -1,0 +1,6 @@
+
+
+tiles: 8x8
+create: pixels map
+colors: 4
+palette: "0072BC"
