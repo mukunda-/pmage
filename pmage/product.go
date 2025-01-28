@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"slices"
 )
 
 type Color uint32
@@ -58,40 +59,63 @@ type Product struct {
 
 var ErrInvalidImage = errors.New("invalid image")
 var ErrUnsupported = errors.New("unsupported operation")
+var ErrConversion = errors.New("conversion error")
+
+func CreateProduct(profile *Profile, pmf *PmageFile) *Product {
+	return &Product{
+		Profile: profile,
+		Pmf:     pmf,
+	}
+}
 
 func (p *Product) LoadImage(img image.Image) error {
 	if img.Bounds().Min.X != 0 || img.Bounds().Min.Y != 0 {
 		return fmt.Errorf("%w: lower boundary must be zero", ErrInvalidImage)
 	}
 
-	p.Pixels = make([]Pixel, img.Bounds().Max.X*img.Bounds().Max.Y)
+	p.Width = img.Bounds().Max.X
+	p.Height = img.Bounds().Max.Y
+	p.Pixels = make([]Pixel, p.Width*p.Height)
 
-	for y := 0; y < img.Bounds().Max.Y; y++ {
-		for x := 0; x < img.Bounds().Max.X; x++ {
+	for y := 0; y < p.Height; y++ {
+		for x := 0; x < p.Width; x++ {
 			color := img.At(x, y)
 			r, g, b, a := color.RGBA()
-			if r > 255 || g > 255 || b > 255 || a > 255 {
-				return fmt.Errorf("%w: color out of range", ErrInvalidImage)
-			}
-			p.Pixels = append(p.Pixels, Pixel(r+(g<<8)+(b<<16)))
+			r >>= 8 // Scale to 8-bit
+			g >>= 8
+			b >>= 8
+			a >>= 8
+			p.Pixels = append(p.Pixels, Pixel((r)|(g<<8)|(b<<16)|(a<<24)))
 		}
 	}
 	p.PixelFormat = ColorFormat32abgr
 
-	p.convertPixels()
-	p.tilePixels()
+	if err := p.convertPixels(); err != nil {
+		return err
+	}
+	if err := p.tilePixels(); err != nil {
+		return err
+	}
 
 	if p.Pmf.Bpp <= 8 {
-		p.createPalette()
-		p.indexPixels()
+		if err := p.createPalette(); err != nil {
+			return err
+		}
+		if err := p.indexPixels(); err != nil {
+			return err
+		}
 	}
+
+	// if err := p.mapTiles(); err != nil {
+	// 	return err
+	// }
 
 	return nil
 }
 
 func (p *Product) createPalette() error {
 	if p.Pmf.Bpp > 8 {
-		return fmt.Errorf("%w: bpp too high for palette", ErrInvalidImage)
+		return fmt.Errorf("%w: bpp too high for palette", ErrConversion)
 	}
 
 	type paletteEntry struct {
@@ -103,6 +127,10 @@ func (p *Product) createPalette() error {
 	maxColors := 1 << p.Pmf.Bpp
 	colorMap := make(map[Color]paletteEntry)
 
+	// The palette is initially in 24-bit format. Convert to our profile format.
+	convertedPalette := slices.Clone(p.Pmf.Palette)
+	convertColors(convertedPalette, p.Profile.GetColorFormat())
+
 	// Fixed palette entries
 	for _, color := range p.Pmf.Palette {
 		colorMap[color] = paletteEntry{
@@ -112,11 +140,16 @@ func (p *Product) createPalette() error {
 		numColors++
 
 		if numColors > maxColors {
-			return fmt.Errorf("%w: too many colors used", ErrInvalidImage)
+			return fmt.Errorf("%w: too many colors used", ErrConversion)
 		}
 	}
 
 	for _, pixel := range p.Pixels {
+		_, ok := colorMap[Color(pixel)]
+		if ok {
+			continue
+		}
+
 		colorMap[Color(pixel)] = paletteEntry{
 			index: int16(numColors),
 			color: Color(pixel),
@@ -124,7 +157,7 @@ func (p *Product) createPalette() error {
 		numColors++
 
 		if numColors > maxColors {
-			return fmt.Errorf("%w: too many colors used", ErrInvalidImage)
+			return fmt.Errorf("%w: too many colors used", ErrConversion)
 		}
 	}
 
@@ -136,24 +169,26 @@ func (p *Product) createPalette() error {
 	return nil
 }
 
-func convertColors(colors []Color, to ColorFormat) error {
-	switch colorFormat {
+func convertColors[T Color | Pixel](colors []T, to ColorFormat) error {
+	switch to {
 	case ColorFormat15bgr:
 		for i, color := range colors {
 			r := color & 0xFF
 			g := (color >> 8) & 0xFF
 			b := (color >> 16) & 0xFF
-			colors[i] = Color(r>>3 | (g>>3)<<5 | (b>>3)<<10)
+			colors[i] = T(r>>3 | (g>>3)<<5 | (b>>3)<<10)
 		}
 	default:
-		return fmt.Errorf("%w: unsupported color conversion", ErrUnsupported)
+		return fmt.Errorf("%w: unsupported color conversion", ErrConversion)
 	}
+
+	return nil
 }
 
 // Convert the default 32bgra pixels to the color format of the current profile.
 func (p *Product) convertPixels() error {
 	if p.PixelFormat != ColorFormat32abgr {
-		return fmt.Errorf("%w: convert pixels can only convert from 32abgr", ErrUnsupported)
+		return fmt.Errorf("%w: convert pixels can only convert from 32abgr", ErrConversion)
 	}
 
 	colorFormat := p.Profile.GetColorFormat()
@@ -183,8 +218,8 @@ func (p *Product) tilePixels() error {
 
 	newPixels := make([]Pixel, p.Width*p.Height)
 
-	for ty := 0; ty <= vtiles; ty++ {
-		for tx := 0; tx <= htiles; tx++ {
+	for ty := 0; ty < vtiles; ty++ {
+		for tx := 0; tx < htiles; tx++ {
 			for py := 0; py < theight; py++ {
 				for px := 0; px < twidth; px++ {
 					newIndex := ty*twidth*theight*htiles + tx*twidth*theight + py*twidth + px
@@ -197,29 +232,136 @@ func (p *Product) tilePixels() error {
 
 	p.Pixels = newPixels
 	p.Width = twidth
-	p.Height = twidth * theight * htiles * vtiles
+	p.Height = theight * htiles * vtiles
 
 	return nil
 }
 
 func (p *Product) indexPixels() error {
 	if p.Pmf.Bpp > 8 {
-		return fmt.Errorf("%w: bpp too high for indexing", ErrInvalidImage)
+		return fmt.Errorf("%w: bpp too high for indexing", ErrConversion)
 	}
 
-	mapping := make(map[Color]int16)
-	for _, pixel := range p.Palette {
-		mapping[pixel] = 
+	if p.Pmf.Bpp != 2 && p.Pmf.Bpp != 4 && p.Pmf.Bpp != 8 {
+		return fmt.Errorf("%w: unsupported bpp for indexing", ErrConversion)
+	}
 
+	mapping := make(map[Pixel]int16)
+	for i, color := range p.Palette {
+		mapping[Pixel(color)] = int16(i)
+	}
 
 	// Convert the pixels to palette indexes.
-	newPixels := make([]Pixel, len(p.Pixels))
 	for i, pixel := range p.Pixels {
-		newPixels[i] = Pixel(p.Palette[pixel])
+		paletteIndex, ok := mapping[pixel]
+		if !ok {
+			return fmt.Errorf("%w: pixel color not in palette", ErrConversion)
+		}
+		p.Pixels[i] = Pixel(paletteIndex)
+	}
+
+	if p.Pmf.Bpp == 2 {
+		p.PixelFormat = ColorFormatIndexed2
+	} else if p.Pmf.Bpp == 4 {
+		p.PixelFormat = ColorFormatIndexed4
+	} else {
+		p.PixelFormat = ColorFormatIndexed8
+	}
+
+	return nil
+}
+
+// Creates a tilemap and eliminates duplicate tiles in the image.
+func (p *Product) mapTiles() error {
+	if p.Width != int(p.Pmf.TileWidth) {
+		return fmt.Errorf("%w: image width must be tile width", ErrConversion)
+	}
+	if p.Height%int(p.Pmf.TileHeight) != 0 {
+		return fmt.Errorf("%w: image height must be divisible by tile height", ErrConversion)
+	}
+
+	newPixels := []Pixel{}
+	newTileNum := 0
+	newMap := []TileIndex{}
+	tw, th := int(p.Pmf.TileWidth), int(p.Pmf.TileHeight)
+
+	findTile := func(source []Pixel) (index int, hflip bool, vflip bool) {
+		numNewTiles := len(newPixels) / (tw * th)
+		for t := 0; t < numNewTiles; t++ {
+			if slices.Equal(source, newPixels[t*tw*th:(t+1)*tw*th]) {
+				// Matches the tile.
+				return t, false, false
+			}
+
+			matches := true
+			for y := 0; y < th; y++ {
+				for x := 0; x < tw; x++ {
+					if source[y*tw+x] != newPixels[t*tw*th+y*tw+(tw-x)] {
+						matches = false
+						break
+					}
+				}
+			}
+			if matches {
+				return t, true, false
+			}
+
+			matches = true
+			for y := 0; y < th; y++ {
+				for x := 0; x < tw; x++ {
+					if source[y*tw+x] != newPixels[t*tw*th+(th-y)*tw+x] {
+						matches = false
+						break
+					}
+				}
+			}
+			if matches {
+				return t, false, true
+			}
+
+			matches = true
+			for y := 0; y < th; y++ {
+				for x := 0; x < tw; x++ {
+					if source[y*tw+x] != newPixels[t*tw*th+(th-y)*tw+(tw-x)] {
+						matches = false
+						break
+					}
+				}
+			}
+			if matches {
+				return t, true, true
+			}
+
+		}
+		return -1, false, false
+	}
+
+	numTiles := p.Height / th
+	for t := 0; t < numTiles; t++ {
+		pixels := p.Pixels[t*tw*th : (t+1)*tw*th]
+		index, hflip, vflip := findTile(pixels)
+		if index < 0 {
+			newPixels = append(newPixels, pixels...)
+			newTileNum++
+			newMap = append(newMap, TileIndex{Index: uint32(newTileNum - 1)})
+		} else {
+			flags := MapFlags(0)
+			if hflip {
+				flags |= MapFlagHflip
+			}
+			if vflip {
+				flags |= MapFlagVflip
+			}
+			newMap = append(newMap, TileIndex{Index: uint32(index), Flags: flags})
+		}
 	}
 
 	p.Pixels = newPixels
-	p.PixelFormat = ColorFormatIndexed8
+	p.Map = newMap
 
 	return nil
+}
+
+func (p *Product) NumTiles() int {
+	return len(p.Pixels) / int(p.Pmf.TileWidth*p.Pmf.TileHeight)
 }

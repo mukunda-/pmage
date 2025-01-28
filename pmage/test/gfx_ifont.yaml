@@ -1,6 +1,12 @@
 
 
 tiles: 8x8
-create: pixels map
+export: pixels
+
+# alternate format for "bpp"
 colors: 4
-palette: "0072BC"
+
+# specify transparent color key
+transparent: "0072BC"
+
+compression: lz77
