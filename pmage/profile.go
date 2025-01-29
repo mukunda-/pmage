@@ -36,3 +36,10 @@ func (p *Profile) DefaultBpp() int16 {
 func (p *Profile) DefaultSegment() string {
 	return "GRAPHICS"
 }
+
+func (p *Profile) DefaultPixelPacking() PixelPacking {
+	if p.System == SystemSnes {
+		return PixelPackingSnes
+	}
+	panic("unknown system")
+}

@@ -230,7 +230,7 @@ func (pf *PmageFile) parseColor(color string) (Color, error) {
 		r, _ := strconv.ParseUint(color[0:2], 16, 8)
 		g, _ := strconv.ParseUint(color[2:4], 16, 8)
 		b, _ := strconv.ParseUint(color[4:6], 16, 8)
-		return Color((r << 16) | (g << 8) | b), nil
+		return Color((b << 16) | (g << 8) | r), nil
 	}
 	return Color(0), fmt.Errorf("invalid color: %s", color)
 }

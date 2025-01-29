@@ -9,6 +9,7 @@ import (
 
 type Color uint32
 type Pixel uint32
+type PixelPacking int16
 type MapFlags uint32
 type TileIndex struct {
 	Flags MapFlags
@@ -30,6 +31,12 @@ const (
 	ColorFormatIndexed4 ColorFormat = 5 // 16 colors, 4bpp
 	ColorFormatIndexed2 ColorFormat = 6 // 4 colors, 2bpp
 	ColorFormatIndexed1 ColorFormat = 7 // 2 colors, 1bpp
+)
+
+const (
+	PixelPackingDefault PixelPacking = 0 // Inherit from profile.
+	PixelPackingLinear  PixelPacking = 1
+	PixelPackingSnes    PixelPacking = 2
 )
 
 const (
@@ -55,6 +62,8 @@ type Product struct {
 	Pixels []Pixel
 
 	Map []TileIndex
+
+	PixelPacking PixelPacking
 }
 
 var ErrInvalidImage = errors.New("invalid image")
@@ -382,6 +391,11 @@ func (p *Product) NumTiles() int {
 // Convert the pixel data to a byte array.
 func (p *Product) PixelBytes() []byte {
 
+	packing := p.PixelPacking
+	if packing == PixelPackingDefault {
+		packing = p.Profile.DefaultPixelPacking()
+	}
+
 	var data []byte
 
 	// Convert to byte array.
@@ -406,13 +420,30 @@ func (p *Product) PixelBytes() []byte {
 			data[i/2] = byte(p.Pixels[i]) | byte(p.Pixels[i+1]<<4)
 		}
 	case ColorFormatIndexed2:
-		// 1 byte per 4 pixels
-		data = make([]byte, len(p.Pixels)/4)
-		for i := 0; i < len(p.Pixels); i += 4 {
-			data[i/4] = byte(p.Pixels[i]) |
-				byte(p.Pixels[i+1]<<2) |
-				byte(p.Pixels[i+2]<<4) |
-				byte(p.Pixels[i+3]<<6)
+
+		if packing == PixelPackingSnes {
+			// Separated planes
+			// Plane 0 stored in bytes 00h,02h,04h,06h,08h,0Ah,0Ch,0Eh
+			// Plane 1 stored in bytes 01h,03h,05h,07h,09h,0Bh,0Dh,0Fh
+			data = make([]byte, len(p.Pixels))
+			for i := 0; i < len(p.Pixels); i += 8 {
+				a, b := byte(0), byte(0)
+				for bit := 0; bit < 7; bit++ {
+					a |= byte((p.Pixels[i+bit] & 1) << (7 - bit))
+					b |= byte(((p.Pixels[i+bit] >> 1) & 1) << (7 - bit))
+				}
+				data[i/4] = a
+				data[i/4+1] = b
+			}
+		} else {
+			// 1 byte per 4 pixels
+			data = make([]byte, len(p.Pixels)/4)
+			for i := 0; i < len(p.Pixels); i += 4 {
+				data[i/4] = byte(p.Pixels[i]) |
+					byte(p.Pixels[i+1]<<2) |
+					byte(p.Pixels[i+2]<<4) |
+					byte(p.Pixels[i+3]<<6)
+			}
 		}
 	default:
 		panic("unimplemented pixel data format")
