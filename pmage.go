@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strings"
 
 	"go.mukunda.com/pmage/clog"
@@ -12,13 +13,20 @@ import (
 
 var VERSION = "0.1"
 
-const usageText = `Usage: pmage [options] inputpath outputpath
-Use --help for more info.`
-const helpText = `Usage: pmage [options] inputpath outputpath
+var usageText = strings.TrimSpace(`
+Usage: pmage [options] inputpath outputpath
+Use --help for more info.`)
+
+var helpText = strings.TrimSpace(`
+Usage: pmage [options] inputpath outputpath
 
 Options:
 --profile PROFILE, -p PROFILE
-  Select device profile. Can be "snes".`
+  Select device profile. Can be "snes".
+
+--export TYPE, -e TYPE
+  Select export type. Can be "ca65".
+`)
 
 type Config struct {
 	InputFilePath  string
@@ -26,6 +34,27 @@ type Config struct {
 	Profile        string
 	Help           bool
 	ExportType     string
+	Version        bool
+}
+
+func getBuildCommit() string {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, setting := range info.Settings {
+			if setting.Key == "vcs.revision" {
+				return setting.Value
+			}
+		}
+	}
+	return ""
+}
+
+func printVersion() {
+	commit := getBuildCommit()
+	if commit != "" {
+		fmt.Println("pmage version", VERSION, commit)
+	} else {
+		fmt.Println("pmage version", VERSION)
+	}
 }
 
 func pmageCli(args []string) int {
@@ -39,10 +68,17 @@ func pmageCli(args []string) int {
 	flags.StringVar(&config.Profile, "p", "", "Select device profile")
 	flags.BoolVar(&config.Help, "help", false, "Show help")
 	flags.BoolVar(&config.Help, "h", false, "Show help")
+	flags.BoolVar(&config.Help, "?", false, "Show help")
+	flags.BoolVar(&config.Version, "version", false, "Show version")
 	flags.Parse(args)
 
 	if config.Help {
 		fmt.Println(helpText)
+		return 0
+	}
+
+	if config.Version {
+		printVersion()
 		return 0
 	}
 
