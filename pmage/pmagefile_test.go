@@ -14,7 +14,7 @@ func TestLoadingPmage1(t *testing.T) {
 		// Valid data.
 		var pmageFile1 = `
 tiles: 8x16
-create: pixels
+export: pixels
 bpp: 4
 `
 		var pf PmageFile
@@ -29,7 +29,7 @@ bpp: 4
 		// Bpp must be a power of 2.
 		var pmageFile2 = `
 tiles: 8x16
-create: pixels
+export: pixels
 bpp: 3
 `
 		var pf PmageFile
