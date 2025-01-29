@@ -1,15 +1,16 @@
 package pmage
 
 import (
+	"fmt"
 	"image"
-	"image/png"
+	_ "image/png"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
 type Converter interface {
-	Convert(inputPath string, outputPath string) error
+	Convert(inputPath string, outputPath string, exportType string) error
 }
 
 type converter struct {
@@ -30,33 +31,36 @@ func changeExt(inputPath string, newExt string) string {
 	return filepath.Join(dir, name+newExt)
 }
 
-func (c *converter) Convert(inputPath string, outputPath string) (rerr error) {
+func (c *converter) Convert(inputPath string, outputPath string, exportType string) (rerr error) {
 	yamlPath := changeExt(inputPath, ".yaml")
 	var pmageFile PmageFile
 	if err := pmageFile.LoadYamlFile(c.Profile, yamlPath); err != nil {
 		return err
 	}
 
-	file, err := os.Open(inputPath)
+	product := CreateProduct(c.Profile, &pmageFile)
+	inputImage, err := os.Open(inputPath)
 	if err != nil {
 		return err
 	}
-
-	defer file.Close()
-
-	img, _, err := image.Decode(file)
+	defer inputImage.Close()
+	img, _, err := image.Decode(inputImage)
 	if err != nil {
 		return err
 	}
-
-	out, err := os.Create(outputPath)
-	if err != nil {
+	if err := product.LoadImage(img); err != nil {
 		return err
 	}
-	defer out.Close()
 
-	err = png.Encode(out, img)
-	if err != nil {
+	var exporter Exporter
+	switch exportType {
+	case "ca65":
+		exporter = &Ca65Exporter{}
+	default:
+		return fmt.Errorf("Unknown export type \"%s\". Valid export types are [ca65]", exportType)
+	}
+
+	if err := exporter.Export(product, outputPath); err != nil {
 		return err
 	}
 

@@ -18,7 +18,7 @@ create: pixels
 bpp: 4
 `
 		var pf PmageFile
-		assert.NoError(t, pf.LoadYaml(profile, strings.NewReader(pmageFile1)))
+		assert.NoError(t, pf.LoadYaml(profile, strings.NewReader(pmageFile1), "test.yaml"))
 		assert.Equal(t, int16(8), pf.TileWidth)
 		assert.Equal(t, int16(16), pf.TileHeight)
 		assert.Equal(t, CreateMaskPixels, pf.Create)
@@ -33,7 +33,7 @@ create: pixels
 bpp: 3
 `
 		var pf PmageFile
-		assert.Error(t, pf.LoadYaml(profile, strings.NewReader(pmageFile2)))
+		assert.Error(t, pf.LoadYaml(profile, strings.NewReader(pmageFile2), "test.yaml"))
 	}
 
 }

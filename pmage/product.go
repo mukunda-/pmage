@@ -76,6 +76,7 @@ func (p *Product) LoadImage(img image.Image) error {
 	p.Width = img.Bounds().Max.X
 	p.Height = img.Bounds().Max.Y
 	p.Pixels = make([]Pixel, p.Width*p.Height)
+	cursor := 0
 
 	for y := 0; y < p.Height; y++ {
 		for x := 0; x < p.Width; x++ {
@@ -85,7 +86,8 @@ func (p *Product) LoadImage(img image.Image) error {
 			g >>= 8
 			b >>= 8
 			a >>= 8
-			p.Pixels = append(p.Pixels, Pixel((r)|(g<<8)|(b<<16)|(a<<24)))
+			p.Pixels[cursor] = Pixel((r) | (g << 8) | (b << 16) | (a << 24))
+			cursor++
 		}
 	}
 	p.PixelFormat = ColorFormat32abgr
@@ -130,9 +132,11 @@ func (p *Product) createPalette() error {
 	// The palette is initially in 24-bit format. Convert to our profile format.
 	convertedPalette := slices.Clone(p.Pmf.Palette)
 	convertColors(convertedPalette, p.Profile.GetColorFormat())
+	p.PaletteFormat = p.Profile.GetColorFormat()
+	numStaticColors := len(convertedPalette)
 
 	// Fixed palette entries
-	for _, color := range p.Pmf.Palette {
+	for _, color := range convertedPalette {
 		colorMap[color] = paletteEntry{
 			index: int16(numColors),
 			color: color,
@@ -140,7 +144,7 @@ func (p *Product) createPalette() error {
 		numColors++
 
 		if numColors > maxColors {
-			return fmt.Errorf("%w: too many colors used", ErrConversion)
+			return fmt.Errorf("%w: too many colors u	d", ErrConversion)
 		}
 	}
 
@@ -165,6 +169,15 @@ func (p *Product) createPalette() error {
 	for _, color := range colorMap {
 		p.Palette[color.index] = color.color
 	}
+
+	slices.SortFunc(p.Palette[numStaticColors:numColors], func(a, b Color) int {
+		if a < b {
+			return -1
+		} else if a > b {
+			return 1
+		}
+		return 0
+	})
 
 	return nil
 }
@@ -364,4 +377,63 @@ func (p *Product) mapTiles() error {
 
 func (p *Product) NumTiles() int {
 	return len(p.Pixels) / int(p.Pmf.TileWidth*p.Pmf.TileHeight)
+}
+
+// Convert the pixel data to a byte array.
+func (p *Product) PixelBytes() []byte {
+
+	var data []byte
+
+	// Convert to byte array.
+	switch p.PixelFormat {
+	case ColorFormat15bgr:
+		// 2 bytes per pixel
+		data = make([]byte, len(p.Pixels)*2)
+		for i, pixel := range p.Pixels {
+			data[i*2] = byte(pixel)
+			data[i*2+1] = byte(pixel >> 8)
+		}
+	case ColorFormatIndexed8:
+		// 1 byte per pixel
+		data = make([]byte, len(p.Pixels))
+		for i, pixel := range p.Pixels {
+			data[i] = byte(pixel)
+		}
+	case ColorFormatIndexed4:
+		// 1 byte per 2 pixels
+		data = make([]byte, len(p.Pixels)/2)
+		for i := 0; i < len(p.Pixels); i += 2 {
+			data[i/2] = byte(p.Pixels[i]) | byte(p.Pixels[i+1]<<4)
+		}
+	case ColorFormatIndexed2:
+		// 1 byte per 4 pixels
+		data = make([]byte, len(p.Pixels)/4)
+		for i := 0; i < len(p.Pixels); i += 4 {
+			data[i/4] = byte(p.Pixels[i]) |
+				byte(p.Pixels[i+1]<<2) |
+				byte(p.Pixels[i+2]<<4) |
+				byte(p.Pixels[i+3]<<6)
+		}
+	default:
+		panic("unimplemented pixel data format")
+	}
+
+	return applyCompression(data, p.Pmf.Compression)
+}
+
+func (p *Product) PaletteBytes() []byte {
+
+	// Convert to byte array.
+	switch p.PaletteFormat {
+	case ColorFormat15bgr:
+		// 2 bytes per color
+		data := make([]byte, len(p.Palette)*2)
+		for i, color := range p.Palette {
+			data[i*2] = byte(color)
+			data[i*2+1] = byte(color >> 8)
+		}
+		return data
+	}
+
+	panic("unimplemented palette data format")
 }

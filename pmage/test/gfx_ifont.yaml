@@ -1,7 +1,7 @@
 
 
 tiles: 8x8
-export: pixels
+export: pixels palette
 
 # alternate format for "bpp"
 colors: 4

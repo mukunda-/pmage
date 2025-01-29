@@ -32,3 +32,7 @@ func (p *Profile) DefaultBpp() int16 {
 	}
 	panic("unknown system")
 }
+
+func (p *Profile) DefaultSegment() string {
+	return "GRAPHICS"
+}

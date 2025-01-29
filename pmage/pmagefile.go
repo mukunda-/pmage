@@ -38,9 +38,14 @@ type PmageFile struct {
 	Bpp         int16
 	Palette     []Color
 	Compression PixelCompression
+	Name        string
+	Segment     string
 }
 
 type pmageFileInput struct {
+	// Used for the symbols in the output. Not used if name is specified.
+	Filename string
+
 	Tiles       string `yaml:"tiles"`
 	Export      string `yaml:"export"`
 	Bpp         int    `yaml:"bpp"`
@@ -48,6 +53,8 @@ type pmageFileInput struct {
 	Palette     string `yaml:"palette"`
 	Transparent string `yaml:"transparent"` // Alias for palette
 	Compression string `yaml:"compression"`
+	Name        string `yaml:"name"`
+	Segment     string `yaml:"segment"`
 }
 
 var ErrInvalidColors = errors.New("bpp is invalid")
@@ -55,9 +62,9 @@ var ErrInvalidExportOption = errors.New("invalid export option")
 var ErrInvalidTileSize = errors.New("invalid tile size specified")
 
 // Convenience function for loading from a YAML string.
-func CreatePmageFileFromYamlString(profile *Profile, data string) (*PmageFile, error) {
+func CreatePmageFileFromYamlString(profile *Profile, data string, filename string) (*PmageFile, error) {
 	var pf PmageFile
-	err := pf.LoadYamlString(profile, data)
+	err := pf.LoadYamlString(profile, data, filename)
 	if err != nil {
 		return nil, err
 	}
@@ -70,18 +77,18 @@ func (pf *PmageFile) LoadYamlFile(profile *Profile, path string) error {
 		return err
 	}
 	defer file.Close()
-	return pf.LoadYaml(profile, file)
+	return pf.LoadYaml(profile, file, path)
 }
 
-func (pf *PmageFile) LoadYamlString(profile *Profile, data string) error {
-	return pf.LoadYaml(profile, strings.NewReader(data))
+func (pf *PmageFile) LoadYamlString(profile *Profile, data string, filename string) error {
+	return pf.LoadYaml(profile, strings.NewReader(data), filename)
 }
 
-func (pf *PmageFile) LoadYaml(profile *Profile, reader io.Reader) error {
+func (pf *PmageFile) LoadYaml(profile *Profile, reader io.Reader, filename string) error {
 
 	pfinput := pmageFileInput{}
 	yaml.NewDecoder(reader).Decode(&pfinput)
-
+	pfinput.Filename = filename
 	return pf.Load(profile, pfinput)
 }
 
@@ -107,6 +114,10 @@ func (pf *PmageFile) Load(profile *Profile, pfinput pmageFileInput) error {
 	}
 
 	if err := pf.parseCompression(pfinput); err != nil {
+		return err
+	}
+
+	if err := pf.parseName(pfinput); err != nil {
 		return err
 	}
 
@@ -269,11 +280,24 @@ func (pf *PmageFile) parseCompression(pfinput pmageFileInput) error {
 	switch enc {
 	case "lz77":
 		pf.Compression = PixelCompressionLz77
-	case "":
+	case "", "none":
 		pf.Compression = PixelCompressionNone
 	default:
 		return fmt.Errorf("invalid compression: %s", enc)
 	}
 
+	return nil
+}
+
+func (pf *PmageFile) parseName(pfinput pmageFileInput) error {
+	pf.Name = pfinput.Name
+	if pf.Name == "" {
+		pf.Name = pfinput.Filename
+	}
+	return nil
+}
+
+func (pf *PmageFile) parseSegment(pfinput pmageFileInput) error {
+	pf.Segment = pfinput.Segment
 	return nil
 }
